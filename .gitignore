@@ -1,0 +1,21 @@
+# Ambiente virtual
+venv/
+
+
+# Arquivos Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Ambiente
+.env
+.venv
+
+# Uploads
+uploads/*
+
+# Sistema
+.DS_Store
+Thumbs.db

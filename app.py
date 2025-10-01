@@ -17,7 +17,7 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['CRITERIA_FILE'] = 'criteria.json'
 
 # Configurar logging
@@ -30,9 +30,31 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Configurar Gemini AI
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        # Listar modelos disponíveis para debug
+        models = genai.list_models()
+        available_models = [model.name for model in models]
+        logger.info(f"Modelos disponíveis: {available_models}")
+        
+        # Usar modelo disponível
+        if 'models/gemini-1.5-pro' in available_models:
+            GEMINI_MODEL = 'gemini-1.5-pro'
+        elif 'models/gemini-pro' in available_models:
+            GEMINI_MODEL = 'gemini-pro'
+        elif 'models/gemini-1.0-pro' in available_models:
+            GEMINI_MODEL = 'gemini-1.0-pro'
+        else:
+            GEMINI_MODEL = None
+            logger.warning("Nenhum modelo Gemini Pro encontrado")
+            
+        logger.info(f"Usando modelo: {GEMINI_MODEL}")
+    except Exception as e:
+        logger.error(f"Erro ao configurar Gemini: {e}")
+        GEMINI_MODEL = None
 else:
-    logger.warning("GEMINI_API_KEY não encontrada. O sistema usará classificações baseadas em critérios.")
+    logger.warning("GEMINI_API_KEY não encontrada. Usando apenas classificação por critérios.")
+    GEMINI_MODEL = None
 
 # Baixar recursos do NLTK
 def download_nltk_resources():
@@ -255,40 +277,13 @@ class EmailClassifier:
             'details': details
         }
     
-    def classify_email(self, text):
-        """Classifica o email usando critérios ou Gemini AI"""
-        if not text:
-            return {
-                'classification': 'Improdutivo',
-                'score': -10,
-                'reasons': ['Texto vazio ou não extraído'],
-                'details': {}
-            }
-        
-        # Primeiro, análise com critérios
-        criteria_analysis = self.analyze_with_criteria(text)
-        
-        # Se tiver Gemini API, usar para validação adicional
-        if GEMINI_API_KEY:
-            try:
-                gemini_classification = self.classify_with_gemini(text)
-                # Se houver discordância significativa, reconsiderar
-                if (gemini_classification == "Produtivo" and 
-                    criteria_analysis['classification'] in ["Neutro", "Improdutivo"] and
-                    criteria_analysis['score'] >= -2):
-                    criteria_analysis['classification'] = "Produtivo"
-                    criteria_analysis['reasons'].append("Reclassificado pelo Gemini AI")
-                
-                criteria_analysis['gemini_validation'] = gemini_classification
-            except Exception as e:
-                logger.error(f"Erro na validação Gemini: {e}")
-        
-        return criteria_analysis
-    
     def classify_with_gemini(self, text):
         """Classifica o email usando Gemini AI"""
         try:
-            model = genai.GenerativeModel('gemini-pro')
+            if not GEMINI_MODEL:
+                raise Exception("Nenhum modelo Gemini disponível")
+                
+            model = genai.GenerativeModel(GEMINI_MODEL)
             
             prompt = f"""
             Analise este email e classifique como "Produtivo" ou "Improdutivo".
@@ -312,11 +307,41 @@ class EmailClassifier:
             logger.error(f"Erro na classificação com Gemini: {e}")
             raise
     
+    def classify_email(self, text):
+        """Classifica o email usando critérios ou Gemini AI"""
+        if not text:
+            return {
+                'classification': 'Improdutivo',
+                'score': -10,
+                'reasons': ['Texto vazio ou não extraído'],
+                'details': {}
+            }
+        
+        # Primeiro, análise com critérios
+        criteria_analysis = self.analyze_with_criteria(text)
+        
+        # Se tiver Gemini API, usar para validação adicional
+        if GEMINI_MODEL and GEMINI_API_KEY:
+            try:
+                gemini_classification = self.classify_with_gemini(text)
+                # Se houver discordância significativa, reconsiderar
+                if (gemini_classification == "Produtivo" and 
+                    criteria_analysis['classification'] in ["Neutro", "Improdutivo"] and
+                    criteria_analysis['score'] >= -2):
+                    criteria_analysis['classification'] = "Produtivo"
+                    criteria_analysis['reasons'].append("Reclassificado pelo Gemini AI")
+                
+                criteria_analysis['gemini_validation'] = gemini_classification
+            except Exception as e:
+                logger.error(f"Erro na validação Gemini: {e}")
+        
+        return criteria_analysis
+    
     def generate_response(self, email_text, classification, analysis_details):
         """Gera resposta automática baseada na classificação e análise"""
         try:
-            if GEMINI_API_KEY:
-                model = genai.GenerativeModel('gemini-pro')
+            if GEMINI_MODEL and GEMINI_API_KEY:
+                model = genai.GenerativeModel(GEMINI_MODEL)
                 
                 prompt = f"""
                 Com base neste email classificado como "{classification}", gere uma resposta profissional e adequada em português.
@@ -441,8 +466,7 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in {'txt', 'pdf'}
 
+# Configuração para produção
 if __name__ == '__main__':
-    print("Iniciando servidor Flask...")
-    print("Acesse: http://localhost:5000")
-    print("Gerenciar critérios: http://localhost:5000/criteria")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
