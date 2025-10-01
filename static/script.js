@@ -23,7 +23,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const criteriaForm = document.getElementById("criteria-form");
   const productiveKeywords = document.getElementById("productive-keywords");
   const unproductiveKeywords = document.getElementById("unproductive-keywords");
-  const requiredPatterns = document.getElementById("required-patterns");
+
   const minLength = document.getElementById("min-length");
   const maxLength = document.getElementById("max-length");
   const resetCriteriaBtn = document.getElementById("reset-criteria-btn");
@@ -225,7 +225,7 @@ document.addEventListener("DOMContentLoaded", function () {
         // Preencher formulário com critérios atuais
         productiveKeywords.value = criteria.productive_keywords.join("\n");
         unproductiveKeywords.value = criteria.unproductive_keywords.join("\n");
-        requiredPatterns.value = criteria.required_patterns.join("\n");
+
         minLength.value = criteria.min_length;
         maxLength.value = criteria.max_length;
       })
@@ -242,9 +242,7 @@ document.addEventListener("DOMContentLoaded", function () {
       unproductive_keywords: unproductiveKeywords.value
         .split("\n")
         .filter((k) => k.trim()),
-      required_patterns: requiredPatterns.value
-        .split("\n")
-        .filter((p) => p.trim()),
+      required_patterns: generatePatternsFromCombinations(),
       min_length: parseInt(minLength.value),
       max_length: parseInt(maxLength.value),
     };

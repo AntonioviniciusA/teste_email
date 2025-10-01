@@ -26,7 +26,19 @@
     "eficiencia",
     "otimização",
     "melhoria",
-    "inovação"
+    "inovação",
+    "carro",
+    "veiculo",
+    "automovel",
+    "oferta",
+    "promocao",
+    "financiamento",
+    "seminovo",
+    "zero km",
+    "estoque",
+    "revenda",
+    "venda",
+    "oportunidade"
   ],
   "unproductive_keywords": [
     "spam",
@@ -51,12 +63,23 @@
     "gratuito",
     "limitado",
     "exclusivo",
-    "oferta"
+    "manutencao",
+    "reparo",
+    "pecas",
+    "acessorios",
+    "seguro",
+    "garantia",
+    "servico",
+    "treinamento",
+    "suporte",
+    "atualizacao",
+    "guia",
+    "manual"
   ],
   "required_patterns": [
-    "\\b(projeto|tarefa|atividade)\\b.*\\b(prazo|data|entrega)\\b",
-    "\\b(reunião|encontro)\\b.*\\b(agenda|agendar|marcar)\\b",
-    "\\b(relatório|documento|análise)\\b.*\\b(entregar|enviar)\\b"
+    "r'(?i)\\b(carro|veiculo|automovel)\\b'",
+    "r'(?i)\\b(oferta|promocao|desconto|financiamento|oportunidade)\\b'",
+    "r'(?i)\\b(oferta|promocao)\\s+de\\s+(carro|veiculo|automovel)\\b'"
   ],
   "sender_domains_productive": [
     "empresa.com",
@@ -70,5 +93,7 @@
   "max_length": 5000,
   "subject_required": true,
   "requires_action": true,
-  "business_context": true
+  "business_context": true,
+  "productive_weight": 5,
+  "unproductive_weight": -4
 }

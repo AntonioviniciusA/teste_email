@@ -27,34 +27,112 @@ logger = logging.getLogger(__name__)
 # Criar diretório de uploads se não existir
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# Configurar Gemini AI
+# Configurar Gemini AI (simplificado)
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL = None
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        # Listar modelos disponíveis para debug
-        models = genai.list_models()
-        available_models = [model.name for model in models]
-        logger.info(f"Modelos disponíveis: {available_models}")
-        
-        # Usar modelo disponível
-        if 'models/gemini-1.5-pro' in available_models:
-            GEMINI_MODEL = 'gemini-1.5-pro'
-        elif 'models/gemini-pro' in available_models:
-            GEMINI_MODEL = 'gemini-pro'
-        elif 'models/gemini-1.0-pro' in available_models:
-            GEMINI_MODEL = 'gemini-1.0-pro'
-        else:
-            GEMINI_MODEL = None
-            logger.warning("Nenhum modelo Gemini Pro encontrado")
-            
-        logger.info(f"Usando modelo: {GEMINI_MODEL}")
+        GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-1.5-pro')
+        logger.info(f"Gemini configurado. Modelo alvo: {GEMINI_MODEL}")
     except Exception as e:
         logger.error(f"Erro ao configurar Gemini: {e}")
         GEMINI_MODEL = None
 else:
     logger.warning("GEMINI_API_KEY não encontrada. Usando apenas classificação por critérios.")
     GEMINI_MODEL = None
+
+# Lista de modelos candidatos para fallback
+CANDIDATE_MODELS = [
+    lambda: os.getenv('GEMINI_MODEL'),  # respeita env se definida
+    lambda: 'gemini-1.5-flash-latest',
+    lambda: 'gemini-1.5-pro-latest',
+    lambda: 'gemini-1.5-flash',
+    lambda: 'gemini-1.5-flash-8b',
+    lambda: 'gemini-1.5-pro',
+    lambda: 'gemini-pro',
+    lambda: 'gemini-1.0-pro',
+]
+
+def get_candidate_models_from_api():
+    """Tenta listar modelos pela API e retorna nomes potencialmente compatíveis com generateContent."""
+    try:
+        models = genai.list_models()
+        names = []
+        for m in models:
+            name = getattr(m, 'name', None)
+            methods = set(getattr(m, 'supported_generation_methods', []) or [])
+            # Considera modelos que suportam generateContent
+            if name and ('generateContent' in methods or len(methods) == 0):
+                names.append(name.replace('models/', ''))
+        return names
+    except Exception as e:
+        logger.warning(f"Falha ao listar modelos pela API: {e}")
+        return []
+
+def get_all_candidate_models() -> list:
+    """Combina lista estática ampla com a lista dinâmica da API, removendo duplicatas e vazios."""
+    static_candidates = []
+    for provider in CANDIDATE_MODELS:
+        try:
+            cand = provider()
+        except Exception:
+            cand = None
+        if cand:
+            static_candidates.append(cand)
+
+    # Alguns aliases conhecidos
+    static_candidates.extend([
+        'gemini-1.5-flash-001',
+        'gemini-1.5-pro-001',
+        'gemini-1.0-pro-001',
+    ])
+
+    api_candidates = get_candidate_models_from_api()
+
+    all_candidates = []
+    seen = set()
+    for name in static_candidates + api_candidates:
+        if not name:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        all_candidates.append(name)
+    return all_candidates
+
+def _can_generate_with_model(model_name: str) -> bool:
+    try:
+        model = genai.GenerativeModel(model_name)
+        resp = model.generate_content("ping")
+        _ = getattr(resp, 'text', '')
+        return True
+    except Exception as e:
+        logger.warning(f"Modelo '{model_name}' indisponível: {e}")
+        return False
+
+def resolve_working_model() -> str:
+    """Seleciona e retorna um modelo funcional dentre os candidatos, atualizando GEMINI_MODEL se necessário."""
+    global GEMINI_MODEL
+    if not GEMINI_API_KEY:
+        return None
+    # Se já temos um modelo e ele funciona, mantém
+    if GEMINI_MODEL and _can_generate_with_model(GEMINI_MODEL):
+        return GEMINI_MODEL
+
+    # Iterar por TODOS os candidatos (estáticos + listagem da API)
+    for candidate in get_all_candidate_models():
+        if candidate == GEMINI_MODEL:
+            continue
+        if _can_generate_with_model(candidate):
+            GEMINI_MODEL = candidate
+            logger.info(f"Modelo resolvido por fallback: {GEMINI_MODEL}")
+            return GEMINI_MODEL
+
+    # Se nenhum funcionou, mantém como None
+    logger.error("Nenhum modelo Gemini compatível encontrado. Verifique permissões/versão da API.")
+    GEMINI_MODEL = None
+    return None
 
 # Baixar recursos do NLTK
 def download_nltk_resources():
@@ -145,14 +223,23 @@ class EmailProcessor:
         # Remover caracteres especiais e números
         text = re.sub(r'[^a-zA-Záéíóúâêîôûãõç\s]', '', text)
         
-        # Tokenização
-        tokens = word_tokenize(text, language='portuguese')
+        # Tokenização com fallback
+        try:
+            tokens = word_tokenize(text, language='portuguese')
+        except Exception:
+            tokens = text.split()
+        
+        # Stopwords com fallback
+        try:
+            stop_set = self.stop_words
+        except Exception:
+            stop_set = set()
         
         # Remover stop words e aplicar stemming
         filtered_tokens = [
             self.stemmer.stem(token) 
             for token in tokens 
-            if token not in self.stop_words and len(token) > 2
+            if token not in stop_set and len(token) > 2
         ]
         
         return ' '.join(filtered_tokens)
@@ -162,12 +249,14 @@ class EmailProcessor:
         try:
             with open(file_path, 'rb') as file:
                 pdf_reader = PyPDF2.PdfReader(file)
-                text = ''
+                texts = []
                 for page in pdf_reader.pages:
-                    text += page.extract_text()
-                return text
+                    page_text = page.extract_text()
+                    if page_text:
+                        texts.append(page_text)
+                return "\n".join(texts)
         except Exception as e:
-            logger.error(f"Erro ao extrair texto do PDF: {e}")
+            logger.error(f"Erro ao extrair texto do PDF: {e}", exc_info=True)
             return None
     
     def extract_text_from_txt(self, file_path):
@@ -222,9 +311,18 @@ class EmailClassifier:
         # 3. Verificar padrões requeridos
         pattern_matches = []
         for pattern in criteria['required_patterns']:
-            if re.search(pattern, text_lower, re.IGNORECASE):
-                pattern_matches.append(pattern)
-                score += 5
+            # Sanitizar flags inline fora do início (ex.: (?i)) e espaços
+            try:
+                safe_pattern = re.sub(r"\s+", " ", pattern).strip()
+                # Remove quaisquer flags inline posicionadas no meio
+                safe_pattern = re.sub(r"\(\?[aiLmsux]+\)", "", safe_pattern)
+                if re.search(safe_pattern, text_lower, re.IGNORECASE):
+                    pattern_matches.append(pattern)
+                    score += 5
+            except re.error as regex_err:
+                logger.warning(f"Padrão inválido ignorado: {pattern} | Erro: {regex_err}")
+                reasons.append("Um padrão inválido foi ignorado na análise")
+                continue
         
         if pattern_matches:
             reasons.append(f"Padrões produtivos identificados: {len(pattern_matches)}")
@@ -280,10 +378,12 @@ class EmailClassifier:
     def classify_with_gemini(self, text):
         """Classifica o email usando Gemini AI"""
         try:
-            if not GEMINI_MODEL:
+            # Resolver modelo funcional
+            working_model = resolve_working_model()
+            if not working_model:
                 raise Exception("Nenhum modelo Gemini disponível")
-                
-            model = genai.GenerativeModel(GEMINI_MODEL)
+            
+            model = genai.GenerativeModel(working_model)
             
             prompt = f"""
             Analise este email e classifique como "Produtivo" ou "Improdutivo".
@@ -320,18 +420,20 @@ class EmailClassifier:
         # Primeiro, análise com critérios
         criteria_analysis = self.analyze_with_criteria(text)
         
-        # Se tiver Gemini API, usar para validação adicional
-        if GEMINI_MODEL and GEMINI_API_KEY:
+        # Se tiver Gemini API, usar para validação adicional (com resolução automática de modelo)
+        if GEMINI_API_KEY:
             try:
-                gemini_classification = self.classify_with_gemini(text)
-                # Se houver discordância significativa, reconsiderar
-                if (gemini_classification == "Produtivo" and 
-                    criteria_analysis['classification'] in ["Neutro", "Improdutivo"] and
-                    criteria_analysis['score'] >= -2):
-                    criteria_analysis['classification'] = "Produtivo"
-                    criteria_analysis['reasons'].append("Reclassificado pelo Gemini AI")
-                
-                criteria_analysis['gemini_validation'] = gemini_classification
+                working_model = resolve_working_model()
+                if working_model:
+                    gemini_classification = self.classify_with_gemini(text)
+                    # Se houver discordância significativa, reconsiderar
+                    if (gemini_classification == "Produtivo" and 
+                        criteria_analysis['classification'] in ["Neutro", "Improdutivo"] and
+                        criteria_analysis['score'] >= -2):
+                        criteria_analysis['classification'] = "Produtivo"
+                        criteria_analysis['reasons'].append("Reclassificado pelo Gemini AI")
+                    
+                    criteria_analysis['gemini_validation'] = gemini_classification
             except Exception as e:
                 logger.error(f"Erro na validação Gemini: {e}")
         
@@ -404,15 +506,16 @@ def upload_email():
                     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                     file.save(filepath)
                     
-                    # Extrair texto baseado no tipo de arquivo
-                    if filename.lower().endswith('.pdf'):
-                        email_text = classifier.processor.extract_text_from_pdf(filepath)
-                    else:
-                        email_text = classifier.processor.extract_text_from_txt(filepath)
-                    
-                    # Limpar arquivo temporário
-                    if os.path.exists(filepath):
-                        os.remove(filepath)
+                    try:
+                        # Extrair texto baseado no tipo de arquivo
+                        if filename.lower().endswith('.pdf'):
+                            email_text = classifier.processor.extract_text_from_pdf(filepath)
+                        else:
+                            email_text = classifier.processor.extract_text_from_txt(filepath)
+                    finally:
+                        # Limpar arquivo temporário
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
                     
                     if not email_text:
                         return jsonify({'error': 'Não foi possível extrair texto do arquivo'}), 400
@@ -445,7 +548,9 @@ def upload_email():
         })
         
     except Exception as e:
-        logger.error(f"Erro no processamento: {e}")
+        logger.error(f"Erro no processamento: {e}", exc_info=True)
+        if os.getenv('DEBUG_ERRORS') == '1':
+            return jsonify({'error': f'Erro interno: {str(e)}'}), 500
         return jsonify({'error': 'Erro interno no processamento do email'}), 500
 
 @app.route('/criteria', methods=['GET', 'POST'])
@@ -461,6 +566,40 @@ def manage_criteria():
         except Exception as e:
             logger.error(f"Erro ao atualizar critérios: {e}")
             return jsonify({'error': 'Erro ao atualizar critérios'}), 500
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Verifica configuração do Gemini e realiza um ping simples ao modelo."""
+    status = {
+        'gemini_api_key_present': bool(GEMINI_API_KEY),
+        'gemini_model_configured': bool(GEMINI_MODEL),
+        'gemini_model_name': GEMINI_MODEL,
+        'resolved_model': None,
+        'ping_ok': False,
+        'error': None,
+    }
+
+    if not GEMINI_API_KEY:
+        status['error'] = 'Chave ausente.'
+        return jsonify(status), 200
+
+    # Resolver e pingar modelo funcional
+    resolved = resolve_working_model()
+    status['resolved_model'] = resolved
+    if not resolved:
+        status['error'] = 'Nenhum modelo compatível encontrado.'
+        return jsonify(status), 200
+
+    try:
+        model = genai.GenerativeModel(resolved)
+        resp = model.generate_content("ping")
+        text = (getattr(resp, 'text', '') or '').strip()
+        status['ping_ok'] = True if text else True
+    except Exception as e:
+        status['error'] = f"Falha no ping: {e}"
+
+    return jsonify(status), 200
 
 def allowed_file(filename):
     return '.' in filename and \
