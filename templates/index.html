@@ -8,22 +8,25 @@
   </head>
   <body>
     <div class="container">
-      <header>
-        <h1>Sistema de Classificação de Emails</h1>
-        <p class="description">
-          Classifique emails com critérios personalizáveis e gere respostas
-          automáticas
-        </p>
+      <header class="app-header">
+        <div class="title-group">
+          <h1>Sistema de Classificação de Emails</h1>
+          <p class="description">
+            Classifique emails com critérios personalizáveis e gere respostas
+            automáticas
+          </p>
+        </div>
+        <nav class="tab-nav">
+          <div class="tab-buttons">
+            <button class="tab-button active" data-tab="upload">
+              Analisar Email
+            </button>
+            <button class="tab-button" data-tab="criteria">
+              Gerenciar Critérios
+            </button>
+          </div>
+        </nav>
       </header>
-
-      <div class="tab-buttons">
-        <button class="tab-button active" data-tab="upload">
-          Analisar Email
-        </button>
-        <button class="tab-button" data-tab="criteria">
-          Gerenciar Critérios
-        </button>
-      </div>
 
       <div class="tab-content active" id="upload-tab">
         <section class="upload-section">
