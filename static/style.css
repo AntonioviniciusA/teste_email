@@ -17,7 +17,7 @@
 }
 
 body {
-  background-color: #000000;
+  background-color: #ffffff;
   color: var(--dark-color);
   line-height: 1.6;
 }
@@ -429,6 +429,72 @@ h1 {
 @media (max-width: 992px) {
   .tab-content.active {
     flex-direction: column;
+  }
+}
+
+/* Estilos do chat */
+.assistant-section {
+  width: 100%;
+  background-color: white;
+  border-radius: 10px;
+  padding: 15px;
+  margin: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-messages {
+  border: 1px solid #eee;
+  border-radius: 8px;
+  padding: 10px;
+  height: 260px;
+  overflow-y: auto;
+  background: #fafafa;
+}
+
+.chat-msg {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+
+.chat-msg-user {
+  background: rgba(146, 94, 194, 0.12);
+  color: #2c3e50;
+}
+
+.chat-msg-assistant {
+  background: rgba(39, 174, 96, 0.12);
+  color: #1e3d2a;
+}
+
+.chat-msg-error {
+  background: rgba(231, 76, 60, 0.12);
+  color: #7f1d1d;
+}
+
+.chat-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-actions .criteria-input {
+  flex: 1;
+}
+
+#chat-hint {
+  color: var(--gray-color);
+}
+
+@media (max-width: 480px) {
+  .chat-messages {
+    height: 200px;
   }
 }
 
