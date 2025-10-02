@@ -298,11 +298,13 @@ class EmailClassifier:
             details['productive_keywords_found'] = productive_matches
         
         # 2. Verificar palavras-chave improdutivas
+        logger.info(f"Score antes das palavras improdutivas: {score}")
         unproductive_matches = []
         for keyword in criteria['unproductive_keywords']:
             if keyword in text_lower:
                 unproductive_matches.append(keyword)
-                score -= unproductive_weight
+                score -= unproductive_weight * 2
+                logger.info(f"Palavra improdutiva: {keyword} - score: {score}")
         
         if unproductive_matches:
             reasons.append(f"Palavras-chave improdutivas encontradas: {', '.join(unproductive_matches[:5])}")
@@ -352,6 +354,22 @@ class EmailClassifier:
             details['requires_action'] = True
         
         # 6. Verificar contexto de negócio
+        
+        # 7. Verificar órgão/domínio do email
+        email_domains = re.findall(r"@([a-zA-Z0-9.-]+.[a-zA-Z]{2,})", text)
+        suspicious_domains = ["gmail.com", "hotmail.com", "yahoo.com", "outlook.com", "uol.com.br", "bol.com.br"]
+        business_domains = ["empresa.com", "corporativo.com", "institucional.gov", "org.br"]
+        
+        domain_score = 0
+        for domain in email_domains:
+            if domain.lower() in suspicious_domains:
+                domain_score -= 2
+                reasons.append(f"Domínio pessoal/suspeito detectado: {domain}")
+            elif any(bd in domain.lower() for bd in business_domains):
+                domain_score += 3
+                reasons.append(f"Domínio corporativo detectado: {domain}")
+        
+        score += domain_score
         business_indicators = ['empresa', 'negócio', 'cliente', 'projeto', 'equipe', 'gestão']
         business_context = any(indicator in text_lower for indicator in business_indicators)
         
@@ -361,9 +379,30 @@ class EmailClassifier:
             details['business_context'] = True
         
         # Determinar classificação baseada no score
-        if score >= 5:
+        # Verificação especial: se mais palavras improdutivas que produtivas, forçar improdutivo
+        # Verificação rigorosa: se 5+ palavras improdutivas, forçar improdutivo
+        if len(unproductive_matches) >= 5:
+            classification = "Improdutivo"
+            reasons.append("Muitas palavras improdutivas detectadas (5+)")
+            return {
+                "classification": classification,
+                "score": score,
+                "reasons": reasons,
+                "details": details
+            }
+        if len(unproductive_matches) > len(productive_matches) and len(unproductive_matches) > 0:
+            classification = "Improdutivo"
+            reasons.append("Mais palavras improdutivas que produtivas encontradas")
+            return {
+                "classification": classification,
+                "score": score,
+                "reasons": reasons,
+                "details": details
+            }
+        logger.info(f"Score final: {score}")
+        if score >= 3:
             classification = "Produtivo"
-        elif score >= 0:
+        elif score >= -2:
             classification = "Neutro"
         else:
             classification = "Improdutivo"
